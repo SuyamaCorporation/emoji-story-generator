@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>絵文字 ストーリー ジェネレーター</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .emoji-btn { transition: transform 0.15s, box-shadow 0.15s; user-select: none; }
+    .emoji-btn:hover { transform: scale(1.15); }
+    .emoji-btn.locked { box-shadow: 0 0 0 3px #f59e0b; }
+    .story-text { line-height: 1.9; }
+    .card-anim { animation: slideUp 0.35s ease; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-gen { animation: fadeGen 0.4s ease; }
+    @keyframes fadeGen { from { opacity: 0.3; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+  <div class="max-w-xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-pink-300 mb-1">絵文字 ストーリー ジェネレーター</h1>
+      <p class="text-gray-400 text-sm">Emoji Story Generator — Click emojis to lock them</p>
+    </div>
+
+    <!-- Emoji display -->
+    <div class="bg-gray-800 rounded-2xl p-6 mb-5 border border-gray-700 text-center">
+      <p class="text-xs text-gray-500 mb-3">クリックで🔒ロック（再生成でも変わらない）</p>
+      <div id="emoji-row" class="flex justify-center gap-3 mb-2 flex-wrap" role="list" aria-label="ストーリー絵文字"></div>
+      <div id="emoji-labels" class="flex justify-center gap-3 flex-wrap mt-1"></div>
+    </div>
+
+    <!-- Story -->
+    <div id="story-box" class="bg-gray-800 rounded-2xl p-6 mb-5 border border-gray-700">
+      <div id="story-text" class="story-text text-lg text-gray-100 text-center leading-8"></div>
+    </div>
+
+    <!-- Buttons -->
+    <div class="flex flex-wrap justify-center gap-3 mb-4">
+      <button onclick="generate()" class="flex items-center gap-2 bg-pink-600 hover:bg-pink-500 text-white font-bold px-6 py-3 rounded-xl transition-colors shadow-lg">
+        🎲 生成
+      </button>
+      <button onclick="saveStory()" class="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium px-5 py-3 rounded-xl transition-colors">
+        💾 保存 (最大5件)
+      </button>
+      <button onclick="unlockAll()" class="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium px-5 py-3 rounded-xl transition-colors">
+        🔓 全ロック解除
+      </button>
+    </div>
+
+    <!-- Status -->
+    <div id="status-msg" class="text-center text-sm h-6 text-pink-400 mb-4"></div>
+
+    <!-- Saved stories -->
+    <div id="saved-section" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-base font-bold text-pink-300">💾 保存済みストーリー</h2>
+        <button onclick="clearSaved()" class="text-xs text-gray-500 hover:text-red-400 transition-colors">すべて削除</button>
+      </div>
+      <div id="saved-list" class="space-y-3"></div>
+    </div>
+  </div>
+
+  <script>
+    const CATEGORIES = {
+      person:  { label: '人物', emojis: ['👩‍🚀','🧙‍♂️','👨‍🍳','🦸‍♀️','🕵️','👩‍🔬','🤴','👸','🧜‍♀️','🥷','🧑‍🎨','👨‍🚒'] },
+      place:   { label: '場所', emojis: ['🏯','🌌','🏝️','🗻','🌆','🏜️','🌊','🌳','🏟️','🚀','🌕','🏰'] },
+      object:  { label: '物',   emojis: ['💎','🗺️','🧪','📜','🔮','🎸','⚔️','🪄','🏺','📦','🔭','🪐'] },
+      action:  { label: '行動', emojis: ['🏃','🕵️','🎯','💡','🤔','🛡️','✨','🎭','🙈','🤸','🧗','🤿'] },
+      feeling: { label: '気持ち', emojis: ['😮','🥺','😤','🤩','😰','🥳','😌','🫨','🤯','😇','🥰','😈'] },
+      nature:  { label: '自然', emojis: ['🌈','⚡','🌸','❄️','🌊','🍄','🌙','☄️','🌪️','🦋','🌺','🌿'] }
+    };
+
+    const CAT_KEYS = ['person','place','object','action','feeling','nature'];
+    const TEMPLATES = [
+      (e) => `${e.person}が${e.place}で${e.object}を${e.action}した。その時、${e.feeling}な気持ちで${e.nature}を見ていた。`,
+      (e) => `ある日、${e.person}は${e.place}へと向かった。そこには${e.object}があり、思わず${e.action}してしまった。${e.nature}に包まれながら、心は${e.feeling}だった。`,
+      (e) => `${e.place}の片隅で、${e.person}は${e.object}を手に持ち、静かに${e.action}していた。${e.nature}を眺めながら、${e.feeling}な気持ちが溢れてきた。`,
+    ];
+
+    let locked = { person: false, place: false, object: false, action: false, feeling: false, nature: false };
+    let current = { person: '', place: '', object: '', action: '', feeling: '', nature: '' };
+
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    function generate() {
+      CAT_KEYS.forEach(key => {
+        if (!locked[key]) current[key] = pick(CATEGORIES[key].emojis);
+      });
+      const template = pick(TEMPLATES);
+      renderEmojis();
+      const story = template(current);
+      const box = document.getElementById('story-text');
+      box.classList.remove('fade-gen'); void box.offsetWidth; box.classList.add('fade-gen');
+      box.innerHTML = story; // emojis are hardcoded, safe to use innerHTML
+      showStatus('');
+    }
+
+    function renderEmojis() {
+      const row = document.getElementById('emoji-row');
+      const labels = document.getElementById('emoji-labels');
+      row.innerHTML = '';
+      labels.innerHTML = '';
+      CAT_KEYS.forEach(key => {
+        const btn = document.createElement('button');
+        btn.className = 'emoji-btn text-4xl w-14 h-14 flex items-center justify-center rounded-xl bg-gray-700 hover:bg-gray-600 ' + (locked[key] ? 'locked' : '');
+        btn.innerHTML = current[key]; // hardcoded emoji, safe
+        btn.title = (locked[key] ? '🔒 ロック中 — ' : '') + CATEGORIES[key].label;
+        btn.setAttribute('aria-label', CATEGORIES[key].label + (locked[key] ? ' ロック中' : ''));
+        btn.setAttribute('role', 'listitem');
+        btn.onclick = () => toggleLock(key);
+        row.appendChild(btn);
+
+        const lbl = document.createElement('div');
+        lbl.className = 'text-xs text-gray-500 w-14 text-center';
+        lbl.textContent = CATEGORIES[key].label + (locked[key] ? ' 🔒' : '');
+        labels.appendChild(lbl);
+      });
+    }
+
+    function toggleLock(key) {
+      locked[key] = !locked[key];
+      renderEmojis();
+      showStatus(locked[key] ? `${CATEGORIES[key].label}をロックしました 🔒` : `${CATEGORIES[key].label}のロックを解除しました`);
+    }
+
+    function unlockAll() {
+      CAT_KEYS.forEach(k => locked[k] = false);
+      renderEmojis();
+      showStatus('すべてのロックを解除しました');
+    }
+
+    function saveStory() {
+      const storyText = document.getElementById('story-text').innerHTML;
+      if (!storyText || !current.person) { showStatus('先にストーリーを生成してください', true); return; }
+      const saved = loadSaved();
+      if (saved.length >= 5) saved.shift();
+      saved.push({ emojis: { ...current }, story: storyText, id: Date.now() });
+      localStorage.setItem('emoji_stories', JSON.stringify(saved));
+      renderSaved();
+      showStatus('ストーリーを保存しました 💾');
+    }
+
+    function loadSaved() {
+      try { return JSON.parse(localStorage.getItem('emoji_stories') || '[]'); } catch { return []; }
+    }
+
+    function renderSaved() {
+      const saved = loadSaved();
+      const sec = document.getElementById('saved-section');
+      const list = document.getElementById('saved-list');
+      if (saved.length === 0) { sec.classList.add('hidden'); return; }
+      sec.classList.remove('hidden');
+      list.innerHTML = '';
+      saved.slice().reverse().forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'card-anim bg-gray-800 border border-gray-700 rounded-xl p-4 hover:border-pink-500 transition-colors';
+        const emojiLine = document.createElement('div');
+        emojiLine.className = 'text-2xl mb-2 space-x-1';
+        emojiLine.innerHTML = CAT_KEYS.map(k => s.emojis[k]).join(' '); // hardcoded emojis
+        const storyDiv = document.createElement('div');
+        storyDiv.className = 'text-sm text-gray-300 mb-2';
+        storyDiv.innerHTML = s.story; // saved from hardcoded template
+        const footer = document.createElement('div');
+        footer.className = 'flex justify-end';
+        const delBtn = document.createElement('button');
+        delBtn.className = 'text-xs text-gray-600 hover:text-red-400 transition-colors';
+        delBtn.textContent = '削除';
+        delBtn.onclick = () => deleteSaved(s.id);
+        footer.appendChild(delBtn);
+        card.appendChild(emojiLine); card.appendChild(storyDiv); card.appendChild(footer);
+        list.appendChild(card);
+      });
+    }
+
+    function deleteSaved(id) {
+      const saved = loadSaved().filter(s => s.id !== id);
+      localStorage.setItem('emoji_stories', JSON.stringify(saved));
+      renderSaved();
+      showStatus('削除しました');
+    }
+
+    function clearSaved() {
+      if (confirm('保存済みストーリーをすべて削除しますか？')) {
+        localStorage.removeItem('emoji_stories');
+        renderSaved();
+      }
+    }
+
+    let statusTimer;
+    function showStatus(msg, warn=false) {
+      const el = document.getElementById('status-msg');
+      el.textContent = msg;
+      el.className = 'text-center text-sm h-6 mb-4 ' + (warn ? 'text-red-400' : 'text-pink-400');
+      clearTimeout(statusTimer);
+      if (msg) statusTimer = setTimeout(() => { el.textContent = ''; }, 3000);
+    }
+
+    // Init
+    generate();
+    renderSaved();
+  </script>
+</body>
+</html>
